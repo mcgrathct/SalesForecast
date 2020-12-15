@@ -26,6 +26,7 @@ Create a csv file containing a table of sales values. The format should follow t
 ### Import provided files section
 #### Sales
 - Import the sales data file using the provided template. Clean the files into a longer format and adjust the date column. These values are stored df_fis before being consolidated with the primary dataframe (df_full)
+- Use whichever file location you have stored the populated sales value table
 
 #### Create lag df
 - This dataframe stores all lag12 sales (sales for the same month in the prior year) into a single dataframe for use in R. 
@@ -51,6 +52,7 @@ These libraries are loaded in the first code chunk
 
 ### 2 
 - This chunk loads the dataframes created in Jupyter. It also corrects a few columns to further prepare the data for processing.
+- Update the location/working directory to match the csv file locations. The Rmd file was in the same folder as the Python output CSVs when running the code.  
 
 ### 3 
 - This chunk creates time series objects for a number of imported values. 
