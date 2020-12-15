@@ -1,0 +1,302 @@
+```{r, include=FALSE}
+#1 
+
+# Load Libraries
+library(urca)
+library(vars)
+library(mFilter)
+library(tseries)
+library(forecast)
+library(tidyverse)
+library(dplyr)
+library(randomForest)
+library(glmnet)
+library(Metrics)
+
+```
+
+
+
+```{r}
+#2
+
+# Load Data
+
+df = read.csv("HNI.csv")  # read main data
+df_pc = read.csv("HNI_pc.csv")  # read pc file
+df_val = read.csv("HNI_all.csv") 
+df_lag = read.csv("HNI_lag.csv")
+df_pred = read.csv("HNI_pred.csv")
+
+df_pc$X <- NULL
+names(df_pred)[1] <- "date"
+df_pred$date=as.Date(df_pred$date)
+
+
+```
+
+
+
+```{r}
+#3
+
+# Declare time series 
+
+pc <- ts(df_pc$p_c, start = c(2001,1), frequency = 12)
+tcu <- ts(df_val$tcu, start = c(1992,1), frequency = 12)
+ip <- ts(df_val$indpro, start = c(1992,1), frequency = 12)
+rs <- ts(df_val$real_sales, start = c(1992,1), frequency = 12)
+sahm <- ts(df_val$SAHM, start = c(1992,1), frequency = 12)
+```
+
+
+
+```{r}
+#4
+
+# ARIMA forecast 
+
+## Percent change
+fit <- auto.arima(pc)
+fc_pc <- forecast(fit)
+
+## Indpro
+fit <- auto.arima(ip)
+fc_ip <- forecast(fit)
+
+## TCU
+fit <- ets(tcu)
+fc_tcu <- forecast(fit)
+
+## Real Sales
+fit <- auto.arima(rs)
+fc_rs <- forecast(fit)
+
+
+## SAHM
+fit <- auto.arima(sahm)
+fc_s <- forecast(fit)
+```
+
+
+
+```{r}
+#5
+
+# Store forecast in df
+
+## pc forecast df
+df_fpc <- fc_pc %>% 
+  sweep::sw_sweep(.) %>% 
+  filter(key == "forecast") %>% 
+  select(-key)
+
+df_fpc = subset(df_fpc, select = -c(lo.80,lo.95,hi.95) )
+names(df_fpc) <- c("date", "avg", "opt")
+
+## store and combine forecast values 
+
+### SAHM
+df_fs <- fc_s %>% 
+  sweep::sw_sweep(.) %>% 
+  filter(key == "forecast") %>% 
+  select(-key)
+
+df_fs = subset(df_fs, select = -c(lo.80,lo.95,hi.95, hi.80) )
+names(df_fs) <- c("date", "SAHM")
+
+### IP
+df_fip <- fc_ip %>% 
+  sweep::sw_sweep(.) %>% 
+  filter(key == "forecast") %>% 
+  select(-key)
+
+df_fip = subset(df_fip, select = -c(lo.80,lo.95,hi.95, hi.80) )
+names(df_fip) <- c("date", "indpro")
+
+### TCU
+df_ftcu <- fc_tcu %>% 
+  sweep::sw_sweep(.) %>% 
+  filter(key == "forecast") %>% 
+  select(-key)
+
+df_ftcu = subset(df_ftcu, select = -c(lo.80,lo.95,hi.95, hi.80) )
+names(df_ftcu) <- c("date", "tcu")
+
+### RS
+df_frs <- fc_rs %>% 
+  sweep::sw_sweep(.) %>% 
+  filter(key == "forecast") %>% 
+  select(-key)
+
+df_frs = subset(df_frs, select = -c(lo.80,lo.95,hi.95, hi.80) )
+names(df_frs) <- c("date", "real_sales")
+```
+
+
+
+```{r}
+#6
+
+# Combine dataframes
+df_m = merge(df_frs, df_ftcu, by.x="date", by.y="date")
+df_m = merge(df_m, df_fip, by.x="date", by.y="date")
+df_m = merge(df_m, df_fs, by.x="date", by.y="date")
+
+df_m$date=as.Date(df_m$date)
+df_lag$date=as.Date(df_lag$date)
+
+df_m = merge(df_m, df_lag, by.x="date", by.y="date")
+
+
+## Clean up forecast df
+df_m$tcu <- round(df_m$tcu ,digit=2)
+df_m$indpro <- round(df_m$indpro ,digit=2)
+df_m$SAHM <- round(df_m$SAHM ,digit=2)
+
+df_m <- rbind(df_pred, df_m)
+
+remove(df_frs, df_fip, df_fs, fc_pc, df_ftcu, df_pc, 
+       df_val, fc_ip, fc_rs, df_pred, 
+       fc_s, fc_tcu, ip, pc, rs, sahm, tcu) # Clear items of no further use from environment
+
+
+```
+
+
+
+```{r}
+#7
+
+#Linear model
+leng <- as.integer(nrow(df))
+tr_len <- round(.75 * leng)
+
+train=df[1:tr_len,1:7]
+test=df[tr_len+1:leng,1:7]
+test = test[complete.cases(test), ]
+
+
+ggplot(data=train, aes(date, Sales, group=1))+geom_line()+
+  theme(panel.background = element_blank(),plot.title =element_text(hjust = .5) )+xlab("Date")+
+  ggtitle("Training Set Sales")
+
+
+fit=lm(Sales~tcu+indpro+real_sales+SAHM+lag12, data=train)
+summary(fit)
+
+```
+
+```{r}
+#8
+
+# Test on test data
+ltpred = predict(fit, newdata = test) 
+ltpred=data.frame(ltpred)
+ltpred=cbind(ltpred, test$date)
+names(ltpred)[names(ltpred)=="test$date"]="date"
+
+```
+
+
+```{r}
+#9
+
+# Test on predicted data points
+pred = predict(fit, newdata = df_m)
+pred = data.frame(pred)
+pred = cbind(pred, df_m$date)
+names(pred)[names(pred)=="df_m$date"]="date"
+names(pred)[names(pred)=="pred"]="linear"
+
+```
+
+```{r}
+#10
+
+# Create linear model metrics & graph
+lmpreds=(predict(fit, newdata = test))
+mae(test$Sales,lmpreds)
+lmr2=(cor(lmpreds, test$Sales))^2
+lmadjr2=1-(1-lmr2)*(58/53)
+lmres=test$Sales-lmpreds
+hist(lmres, main = "Residual Distribution")
+
+lmpreds=data.frame(lmpreds)
+lmpreds=cbind(lmpreds, test$date)
+names(lmpreds)[names(lmpreds)=="test$date"]="date"
+ggplot(data = test, aes(date,Sales, group=1))+geom_line()+
+  theme(panel.background = element_blank(), plot.title =element_text(hjust = .5))+
+  geom_line(data = lmpreds, aes(date,lmpreds), color="purple")+xlab("Date")+
+  ggtitle("Fitted Values of Sales")
+```
+
+
+```{r}
+#11
+
+#Random Forest model
+rf=randomForest(Sales~tcu+indpro+real_sales+SAHM+lag12, data = train,
+                ntree=1000, mtry=3)
+print(rf)
+
+rfpreds=predict(rf, newdata = test)
+rfpreds=data.frame(rfpreds)
+rfpreds=cbind(rfpreds, test$date)
+names(rfpreds)[names(rfpreds)=="test$date"]="date"
+ggplot(data = test, aes(date,Sales, group=1))+geom_line()+theme(panel.background = element_blank())+
+  geom_line(data = rfpreds, aes(date,rfpreds), color="purple")
+```
+
+```{r}
+#12
+
+#Random Forest forecast
+rfpred=predict(rf, newdata = df_m)
+rfpred=data.frame(rfpred)
+
+pred=cbind(rfpred, pred)
+names(pred)[names(pred)=="rfpred"]="rf"
+
+pred <- pred[c(3,2,1)]
+```
+
+```{r}
+#13
+
+#glmnet model
+x=as.matrix(df[,c(2,3,4,5,7)])
+y=as.matrix(df$Sales)
+cvfit=cv.glmnet(x[1:175,],y[1:175,],type.measure = "mae")
+plot(cvfit)
+newx=x[176:234,]
+glmpreds=predict(cvfit,newx, s="lambda.1se")
+```
+
+
+
+
+```{r}
+#14
+
+# Create forecast df containing model outputs
+df_fpc$date=as.Date(df_fpc$date)
+pred$date=as.Date(pred$date)
+df_lag$date=as.Date(df_lag$date)
+
+
+dplr <- left_join(df_fpc, pred, by="date")
+dplr = dplr[complete.cases(dplr), ]
+
+dplr <- left_join(dplr, df_lag, by="date")
+
+dplr$pco <- ((100 + dplr$opt)/100) * dplr$lag12
+dplr$opt <- (dplr$linear+dplr$pco)/2
+
+fisoutlook <- dplr[ -c(2,3,6) ]
+
+remove(cvfit, df, df_fpc, df_lag, fit, glmpreds, 
+       lmpreds, ltpred, newx, pred, rf, rfpred, 
+       rfpreds, test, train, x, y, leng, lmadjr2,
+       lmr2, lmres, tr_len) # Clear items of no further use from environment
+```
