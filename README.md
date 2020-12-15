@@ -88,3 +88,4 @@ These libraries are loaded in the first code chunk
 ## 14 (output)
 - Create a consolidated dataframe with forecasted values for given periods.
 - The dataframe containing the output for forecasted values is called fisoutlook. The date columns is self-explanatory, the linear column contains predicted values from the df_m input into the linear model, the rf columns contains predicted values from the df_m input into the random forest, and the opt column contains values values created by an average of the output from the linear model and the ARIMA outputs from the monthly sales percent change over prior years numbers. 
+- Running this cell clears most of the environment, aside from the primary output
